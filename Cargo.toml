@@ -1,0 +1,19 @@
+[package]
+name = "enough"
+version = "0.1.0"
+edition = "2024"
+authors = ["fruit-bird"]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-apple-darwin", "aarch64-apple-darwin"]
+
+[dependencies]
+chrono = { version = "0.4.41", features = ["serde"] }
+clap = { version = "4.5.46", features = ["derive"] }
+config = { version = "0.15.14", features = ["yaml", "json"] }
+humantime-serde = "1.1.1"
+serde = { version = "1.0.219", features = ["derive"] }
+url = { version = "2.5.7", features = ["serde"] }
+serde_yml = "0.0.12"
+anyhow = "1.0.99"
+uuid = { version = "1.18.0", features = ["v4", "fast-rng"] }

@@ -1,0 +1,19 @@
+default-profile: lock-in
+
+profiles:
+  lock-in:
+    duration: 2m10s
+    websites:
+      - https://www.youtube.com/
+      - https://reddit.com/
+      - https://www.github.com/
+    apps:
+      - /Applications/CrossOver.app
+      - /Applications/Steam.app
+      # - /nix/store/d2ap3myk8zyzgfi9c2p87in3mvljvbw4-spotify-1.2.64.408/Applications/Spotify.app
+
+  wind-down:
+    duration: 4hr 4mins4sec
+    websites:
+      - https://www.youtube.com/
+      - https://www.github.com/
