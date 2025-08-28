@@ -1,10 +1,16 @@
 use anyhow::{Context, Ok, Result};
+use chrono::Utc;
 use clap::{Command, CommandFactory as _, Parser, Subcommand};
-use humantime_serde::re::humantime::parse_duration;
-use std::io;
-use std::{env, fmt::Debug, path::PathBuf, time::Duration};
+use humantime_serde::re::humantime::{format_duration, parse_duration};
+use std::{
+    env,
+    fmt::Debug,
+    io::{self, Write as _},
+    path::PathBuf,
+    time::Duration,
+};
 
-use crate::block::BlockManager;
+use crate::block::{BlockManager, Status};
 use crate::config::EnoughConfig;
 
 /// Enough overstimulation, take back control over your focus
@@ -58,7 +64,14 @@ enum EnoughOptions {
         fix: bool,
     },
     /// Show current status
-    Status,
+    Status {
+        /// Output in JSON format
+        #[clap(long, default_value = "false")]
+        json: bool,
+        /// Output in a single line (for status bars)
+        #[clap(long, default_value = "false", conflicts_with = "json")]
+        line: bool,
+    },
     /// List available profiles
     Profiles {
         #[clap(short, long)]
@@ -84,6 +97,7 @@ impl EnoughOptions {
                 duration,
             } => {
                 is_sudo()?;
+
                 let block_manager = BlockManager::new();
                 if block_manager.get_status(false)?.is_blocked() {
                     anyhow::bail!("A block is already active, please wait until it expires");
@@ -102,7 +116,7 @@ impl EnoughOptions {
                 let duration = duration.unwrap_or(profile.duration);
 
                 let block_manager = BlockManager::new();
-                block_manager.block_items(profile, duration)?;
+                block_manager.block_items(&profile_name, profile, duration)?;
             }
             Self::Unblock { fix } => {
                 is_sudo()?;
@@ -115,9 +129,35 @@ impl EnoughOptions {
                     eprintln!("This command is for internal use only, do NOT run it manually");
                 }
             }
-            Self::Status => {
+            Self::Status { json, line } => {
                 let block_manager = BlockManager::new();
-                block_manager.get_status(true)?;
+                if json {
+                    let status = block_manager.get_status(false)?;
+                    if status.is_blocked() {
+                        let json = serde_json::to_string(&status)?;
+                        println!("{:#}", json);
+                    }
+                } else if line {
+                    let status = block_manager.get_status(false)?;
+                    match status {
+                        Status::Blocked {
+                            profile_name,
+                            unblock_time,
+                        } => {
+                            let now = Utc::now();
+                            let remaining = unblock_time
+                                .signed_duration_since(now)
+                                .to_std()
+                                .unwrap_or_default();
+                            let remaining_secs = Duration::from_secs(remaining.as_secs());
+                            print!("🔴 {} ({})", profile_name, format_duration(remaining_secs));
+                        }
+                        Status::Unblocked => print!("🟢 Unblocked"),
+                    }
+                    io::stdout().flush()?;
+                } else {
+                    block_manager.get_status(true)?;
+                }
             }
             Self::Profiles { config } => {
                 let conf = EnoughConfig::load(config)?;

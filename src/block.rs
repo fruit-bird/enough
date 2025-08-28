@@ -25,6 +25,7 @@ pub struct BlockManager {
 
 #[derive(Serialize, Deserialize)]
 struct BlockState {
+    profile_name: String,
     profile: Profile,
     unblock_time_secs: u64,
 }
@@ -36,7 +37,12 @@ impl BlockManager {
         }
     }
 
-    pub fn block_items(&self, profile: &Profile, duration: Duration) -> Result<()> {
+    pub fn block_items(
+        &self,
+        profile_name: &str,
+        profile: &Profile,
+        duration: Duration,
+    ) -> Result<()> {
         fs::create_dir_all(&self.state_dir)?; // Creating state directory
         self.unblock_all()?; // cleaning up any previous state
 
@@ -50,7 +56,7 @@ impl BlockManager {
 
         let unblock_time = SystemTime::now() + duration;
         self.schedule_unblock(unblock_time.into())?;
-        self.save_block_state(profile, unblock_time)?;
+        self.save_block_state(profile_name, profile, unblock_time)?;
 
         Ok(())
     }
@@ -171,8 +177,14 @@ impl BlockManager {
         LaunchDaemon::create_unblock_daemon(unblock_time)
     }
 
-    fn save_block_state(&self, profile: &Profile, unblock_time: SystemTime) -> Result<()> {
+    fn save_block_state(
+        &self,
+        profile_name: &str,
+        profile: &Profile,
+        unblock_time: SystemTime,
+    ) -> Result<()> {
         let state = BlockState {
+            profile_name: profile_name.to_string(),
             profile: profile.clone(),
             unblock_time_secs: unblock_time.duration_since(UNIX_EPOCH)?.as_secs(),
         };
@@ -203,19 +215,26 @@ impl BlockManager {
         if now < unblock_time && print {
             let remaining = unblock_time.duration_since(now)?;
 
-            println!("Active block:");
+            println!("Active block (profile: {})", state.profile_name);
             println!("• {} apps blocked", state.profile.apps.len());
             println!("• {} websites blocked", state.profile.websites.len());
             println!("• Time remaining: {}", format_duration(remaining));
         }
 
-        Ok(Status::Blocked)
+        Ok(Status::Blocked {
+            profile_name: state.profile_name,
+            unblock_time: unblock_time.into(),
+        })
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
 pub enum Status {
-    Blocked,
+    Blocked {
+        profile_name: String,
+        unblock_time: DateTime<Local>,
+    },
     Unblocked,
 }
 
@@ -225,7 +244,7 @@ impl Status {
     /// [`Blocked`]: Status::Blocked
     #[must_use]
     pub fn is_blocked(&self) -> bool {
-        matches!(self, Self::Blocked)
+        matches!(self, Self::Blocked { .. })
     }
 }
 
