@@ -1,6 +1,7 @@
 use anyhow::{Context, Ok, Result};
-use clap::{Parser, Subcommand};
+use clap::{Command, CommandFactory as _, Parser, Subcommand};
 use humantime_serde::re::humantime::parse_duration;
+use std::io;
 use std::{env, fmt::Debug, path::PathBuf, time::Duration};
 
 use crate::block::BlockManager;
@@ -63,6 +64,11 @@ enum EnoughOptions {
         #[clap(short, long)]
         config: Option<PathBuf>,
     },
+    /// Generate shell completions
+    Completions {
+        /// The shell to generate the completions for
+        shell: clap_complete::Shell,
+    },
 }
 
 impl EnoughOptions {
@@ -116,6 +122,19 @@ impl EnoughOptions {
             Self::Profiles { config } => {
                 let conf = EnoughConfig::load(config)?;
                 println!("{}", conf);
+            }
+            Self::Completions { shell } => {
+                let cmd = EnoughCLI::command();
+                let name = cmd.get_name().to_string();
+
+                let mut filtered_cmd = Command::new(env!("CARGO_PKG_NAME"));
+                for sub in cmd.get_subcommands() {
+                    if sub.get_name() != "___zzzunblock" {
+                        filtered_cmd = filtered_cmd.subcommand(sub);
+                    }
+                }
+
+                clap_complete::generate(shell, &mut filtered_cmd, name, &mut io::stdout());
             }
         }
 
