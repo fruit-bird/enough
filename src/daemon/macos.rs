@@ -25,8 +25,10 @@ impl LaunchDaemon {
         fs::write(&plist_path, plist_content)
             .with_context(|| format!("Failed to write plist file to {}", plist_path.display()))?;
 
+        let uid = env::var("UID").unwrap_or_else(|_| "501".to_string());
         let output = Command::new("launchctl")
-            .arg("load")
+            .arg("bootstrap")
+            .arg(format!("gui/{}", uid))
             .arg(&plist_path)
             .output()
             .context("Failed to execute launchctl load command")?;
@@ -55,8 +57,10 @@ impl LaunchDaemon {
             fs::remove_file(STATE_BACKUP_PATH)?;
 
             // unloading the daemon
+            let uid = env::var("UID").unwrap_or_else(|_| "501".to_string());
             let output = Command::new("launchctl")
-                .arg("unload")
+                .arg("bootout")
+                .arg(format!("gui/{}", uid))
                 .arg(&plist_path)
                 .output()?;
 
