@@ -94,11 +94,14 @@ impl EnoughConfig {
     }
 
     fn find_config_file() -> Option<PathBuf> {
-        let home = env::var("HOME").ok()?;
+        let home = env::home_dir()?;
         let possible_paths = [
             PathBuf::from("enough.yaml"),
+            PathBuf::from("enough.yml"),
             PathBuf::from(&home).join(".config/enough/enough.yaml"),
+            PathBuf::from(&home).join(".config/enough/enough.yml"),
             PathBuf::from(&home).join(".config/enough.yaml"),
+            PathBuf::from(&home).join(".config/enough.yml"),
         ];
 
         for path in possible_paths {
@@ -111,7 +114,7 @@ impl EnoughConfig {
     }
 
     fn default_config_path() -> PathBuf {
-        let home = env::var("HOME")
+        let home = env::home_dir()
             .with_context(|| "$HOME environment variable not set")
             .unwrap();
 
