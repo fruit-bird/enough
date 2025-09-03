@@ -10,7 +10,10 @@ use std::{
 };
 use url::Url;
 
-use crate::{config::Profile, daemon::LaunchDaemon};
+use crate::{
+    config::Profile,
+    daemon::{EnoughDaemon, UnblockingDaemon},
+};
 
 const HOSTS_FILE: &str = "/etc/hosts";
 const ENOUGH_MARKER_START: &str = "# ENOUGH BLOCK START";
@@ -114,7 +117,7 @@ impl BlockManager {
         // Self::unblock_apps()?;
 
         // Removing launchd daemon
-        LaunchDaemon::remove()?;
+        EnoughDaemon::remove()?;
 
         // Cleaning up state
         fs::remove_dir_all(&self.state_dir)?;
@@ -174,7 +177,8 @@ impl BlockManager {
     }
 
     fn schedule_unblock(&self, unblock_time: DateTime<Local>) -> Result<()> {
-        LaunchDaemon::create_unblock_daemon(unblock_time)
+        EnoughDaemon::schedule(unblock_time)?;
+        Ok(())
     }
 
     fn save_block_state(
@@ -196,6 +200,7 @@ impl BlockManager {
         Ok(())
     }
 
+    // i don't fw this function mixing printing with business logic
     pub fn get_status(&self, print: bool) -> Result<Status> {
         let state_file = self.state_dir.join("current_block.yaml");
 

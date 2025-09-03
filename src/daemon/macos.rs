@@ -1,23 +1,26 @@
-#![cfg(target_os = "macos")]
-
 use anyhow::{Context as _, Ok, Result};
 use chrono::{DateTime, Local, Timelike as _};
+use std::io::Write;
 use std::{
     env, fs,
+    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::Command,
 };
 use uuid::Uuid;
 
-const DAEMON_INFO_PATH: &str = "/tmp/enough/daemon_id";
+use crate::daemon::UnblockingDaemon;
+
+const DAEMON_ID_PATH: &str = "/tmp/enough/daemon_id";
 const STATE_BACKUP_PATH: &str = "/tmp/enough/current_block.yaml";
+const HOME_DIR_BACKUP_PATH: &str = "/tmp/enough/home_dir";
 
 pub struct LaunchDaemon;
 
-impl LaunchDaemon {
-    pub fn create_unblock_daemon(unblock_time: DateTime<Local>) -> Result<()> {
+impl UnblockingDaemon for LaunchDaemon {
+    fn schedule(unblock_time: DateTime<Local>) -> Result<()> {
         let daemon_id = format!("com.enough.unblock.{}", Uuid::new_v4());
-        let plist_path = Self::get_plist_path(&daemon_id)?;
+        let plist_path = Self::get_plist_path(&daemon_id, None)?;
 
         let current_exe = env::current_exe().context("Failed to get current executable path")?;
         let plist_content = Self::generate_plist(&daemon_id, &current_exe, unblock_time);
@@ -25,10 +28,8 @@ impl LaunchDaemon {
         fs::write(&plist_path, plist_content)
             .with_context(|| format!("Failed to write plist file to {}", plist_path.display()))?;
 
-        let uid = env::var("UID").unwrap_or_else(|_| "501".to_string());
         let output = Command::new("launchctl")
-            .arg("bootstrap")
-            .arg(format!("gui/{}", uid))
+            .arg("load")
             .arg(&plist_path)
             .output()
             .context("Failed to execute launchctl load command")?;
@@ -41,51 +42,72 @@ impl LaunchDaemon {
         eprint!("Scheduled unblock for ");
         println!("{}", unblock_time.format("%H:%M:%S"));
 
+        let home_dir = env::home_dir().with_context(|| "Couldn't find the home directory")?;
+        eprintln!("backed up home dir: {}", home_dir.display());
         // saving daemon info for cleanup
         fs::create_dir_all("/tmp/enough")?;
-        fs::write(DAEMON_INFO_PATH, &daemon_id)?;
+        fs::write(DAEMON_ID_PATH, &daemon_id)?;
+        fs::write(HOME_DIR_BACKUP_PATH, home_dir.as_os_str().as_bytes())?;
 
         Ok(())
     }
 
-    pub fn remove() -> Result<()> {
-        if Path::new(DAEMON_INFO_PATH).exists() {
-            let daemon_id = fs::read_to_string(DAEMON_INFO_PATH)?;
-            let plist_path = Self::get_plist_path(&daemon_id.trim())?;
+    fn remove() -> Result<()> {
+        if Path::new(DAEMON_ID_PATH).exists() {
+            let daemon_id = fs::read_to_string(DAEMON_ID_PATH)?;
+            let home_dir = fs::read_to_string(HOME_DIR_BACKUP_PATH)?;
+            eprintln!("restored home dir: {}", home_dir);
+            let plist_path = Self::get_plist_path(&daemon_id.trim(), Some(home_dir.into()))?;
+            eprintln!("restored plist path: {}", plist_path.display());
 
-            fs::remove_file(DAEMON_INFO_PATH)?;
+            fs::remove_file(DAEMON_ID_PATH)?;
             fs::remove_file(STATE_BACKUP_PATH)?;
+            fs::remove_file(HOME_DIR_BACKUP_PATH)?;
 
             // unloading the daemon
-            let uid = env::var("UID").unwrap_or_else(|_| "501".to_string());
+            eprintln!("Unloading daemon with ID: {}", daemon_id);
             let output = Command::new("launchctl")
-                .arg("bootout")
-                .arg(format!("gui/{}", uid))
+                .arg("unload")
                 .arg(&plist_path)
                 .output()?;
+            eprintln!("Unloaded daemon with ID: {}", daemon_id);
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 anyhow::bail!("launchctl unload failed: {}", stderr);
             }
 
+            writeln!(
+                std::fs::File::create("~/Downloads/daemon_unloaded")?,
+                "Unloaded daemon with ID: {}",
+                daemon_id
+            )?;
+
             fs::remove_file(&plist_path)?;
         }
 
         Ok(())
     }
+}
 
-    fn get_plist_path(daemon_id: &str) -> Result<PathBuf> {
-        // Going with this approach rather than fetching $HOME because when run with sudo,
-        // $HOME points to /var/root which messes up the path to LaunchAgents
-        let home_dir_bytes = Command::new("realpath")
-            .arg("~")
-            .output()
-            .context("Failed to get home directory using realpath")?
-            .stdout;
-        let home_dir = String::from_utf8_lossy(&home_dir_bytes);
-        let launch_agents_dir = format!("{}/Library/LaunchAgents", home_dir.trim());
+impl LaunchDaemon {
+    fn get_plist_path(daemon_id: &str, home_dir: Option<PathBuf>) -> Result<PathBuf> {
+        let home_dir = match home_dir {
+            Some(home) => home,
+            None => {
+                let home_dir_bytes = env::home_dir().context("Couldn't find the home directory")?;
+                let home_dir = String::from_utf8_lossy(&home_dir_bytes.as_os_str().as_bytes());
+                home_dir.trim().to_string().into()
+            }
+        };
+
+        let launch_agents_dir = format!("{}/Library/LaunchAgents", home_dir.display());
         let plist_path = Path::new(&launch_agents_dir).join(format!("{}.plist", daemon_id));
+
+        eprintln!(
+            "The plish path that will be used is: {}",
+            plist_path.display()
+        );
 
         Ok(plist_path)
     }
@@ -128,9 +150,9 @@ impl LaunchDaemon {
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/tmp/enough/unblock.log</string>
+    <string>/tmp/enough/unblock.out</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/enough/unblock.log</string>
+    <string>/tmp/enough/unblock.err</string>
 </dict>
 </plist>"#,
             daemon_id,
